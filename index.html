@@ -5,439 +5,404 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Hero Three.js Vanilla</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-        }
-        body {
-            overflow: hidden;
-            background: #000;
-        }
-        canvas {
-            display: block;
-        }
+        * { margin: 0; padding: 0; }
+        body { overflow: hidden; background: #000; }
+        canvas { display: block; }
     </style>
 </head>
 <body>
 
-    <!-- Muat postprocessing.js sebagai skrip biasa (UMD) -->
+    <!-- Muat Three.js sebagai skrip biasa (global) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Muat OrbitControls sebagai skrip biasa -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/controls/OrbitControls.js"></script>
+    <!-- Muat postprocessing.js (harus setelah THREE) -->
     <script src="postprocessing.js"></script>
 
-    <!-- Import map untuk Three.js dan addons -->
-    <script type="importmap">
-        {
-            "imports": {
-                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    <script>
+        // Sekarang THREE dan POSTPROCESSING tersedia secara global
+        // Kita akan menulis semua kode di sini, tidak perlu modul ES6
+        // Karena semua sudah global.
+        (function() {
+            'use strict';
+
+            // ============================================================
+            //  SHADER SOURCE (salin dari kode sebelumnya, saya singkatkan)
+            //  Salin semua string shader di sini.
+            // ============================================================
+            const sphereVertexShader = `...`;
+            const sphereFragmentShader = `...`;
+            const heroVertexShader = `...`;
+            const heroFragmentShader = `...`;
+            const heroDepthFragmentShader = `...`;
+            const floorVertexShader = `...`;
+            const floorFragmentShader = `...`;
+
+            // ============================================================
+            //  KONSTANTA
+            // ============================================================
+            const INSTANCES_COUNT = 3000;
+            const lightPosition = new THREE.Vector3(-1, 0.8, 0.25).normalize().multiplyScalar(5);
+
+            // ============================================================
+            //  SETUP DASAR
+            // ============================================================
+            const scene = new THREE.Scene();
+            const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 30);
+            camera.position.set(0, 0, 5);
+
+            const renderer = new THREE.WebGLRenderer({
+                antialias: false,
+                powerPreference: 'high-performance',
+                stencil: false,
+                alpha: false,
+            });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 1.0;
+            document.body.appendChild(renderer.domElement);
+
+            const controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.minDistance = 1;
+            controls.maxDistance = 15;
+            controls.target.set(0, 0, 0);
+
+            // ============================================================
+            //  POSTPROCESSING (menggunakan POSTPROCESSING global)
+            // ============================================================
+            const {
+                EffectComposer,
+                RenderPass,
+                EffectPass,
+                BloomEffect,
+                KernelSize,
+                Resolution,
+                SMAAEffect,
+                VignetteEffect,
+                KawaseBlurPass
+            } = window.POSTPROCESSING;
+
+            const composer = new EffectComposer(renderer, {
+                multisampling: 0,
+                antialias: false,
+                alpha: false,
+            });
+            composer.addPass(new RenderPass(scene, camera));
+
+            const bloom = new BloomEffect({
+                mipmapBlur: true,
+                luminanceThreshold: 0.65,
+                luminanceSmoothing: 0.01,
+                intensity: 2,
+                kernelSize: KernelSize.MEDIUM,
+                resolutionScale: 0.5,
+                resolutionX: Resolution.AUTO_SIZE,
+                resolutionY: Resolution.AUTO_SIZE,
+                width: Resolution.AUTO_SIZE,
+                height: Resolution.AUTO_SIZE,
+            });
+            const vignette = new VignetteEffect({
+                darkness: 0.6,
+                offset: 0.3,
+            });
+            composer.addPass(new EffectPass(camera, new SMAAEffect()));
+            composer.addPass(new EffectPass(camera, bloom));
+            composer.addPass(new EffectPass(camera, vignette));
+
+            // ============================================================
+            //  LOAD TEXTURES
+            // ============================================================
+            const loader = new THREE.TextureLoader();
+            const noiseTexture = loader.load('bnoise.png');
+            noiseTexture.wrapS = THREE.RepeatWrapping;
+            noiseTexture.wrapT = THREE.RepeatWrapping;
+            const matcapTexture = loader.load('glass.png');
+
+            // ============================================================
+            //  LIGHTS
+            // ============================================================
+            const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+            dirLight.position.copy(lightPosition);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 1024;
+            dirLight.shadow.mapSize.height = 1024;
+            dirLight.shadow.camera.left = -3;
+            dirLight.shadow.camera.right = 3;
+            dirLight.shadow.camera.top = 3;
+            dirLight.shadow.camera.bottom = -3;
+            dirLight.shadow.camera.near = 0.1;
+            dirLight.shadow.camera.far = 20;
+            dirLight.shadow.bias = -0.0001;
+            scene.add(dirLight);
+
+            // ============================================================
+            //  BACKGROUND
+            // ============================================================
+            const bgUniforms = {
+                u_color0: { value: new THREE.Color('#AEB2B5') },
+                u_color1: { value: new THREE.Color('#939A9D') },
+            };
+            const bgMat = new THREE.ShaderMaterial({
+                vertexShader: `
+                    varying vec2 v_uv;
+                    void main() {
+                        v_uv = position.xy * 0.5 + 0.5;
+                        gl_Position = vec4(position.xy, 0.0, 1.0);
+                    }
+                `,
+                fragmentShader: `
+                    varying vec2 v_uv;
+                    uniform vec3 u_color0;
+                    uniform vec3 u_color1;
+                    void main() {
+                        gl_FragColor = vec4(mix(u_color0, u_color1, v_uv.x), 1.0);
+                    }
+                `,
+                uniforms: bgUniforms,
+                depthWrite: false,
+                depthTest: false,
+            });
+            const bgMesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), bgMat);
+            bgMesh.renderOrder = -2;
+            scene.add(bgMesh);
+
+            // ============================================================
+            //  HERO GEOMETRY (Instanced)
+            // ============================================================
+            const refGeo = new THREE.CapsuleGeometry(1, 4, 4, 16);
+            refGeo.computeBoundingBox();
+
+            const heroGeo = new THREE.InstancedBufferGeometry();
+            for (const key in refGeo.attributes) {
+                heroGeo.setAttribute(key, refGeo.attributes[key]);
             }
-        }
-    </script>
+            heroGeo.setIndex(refGeo.index);
 
-    <script type="module">
-        // ============================================================
-        //  Ambil objek POSTPROCESSING dari global (window)
-        // ============================================================
-        const {
-            EffectComposer,
-            RenderPass,
-            EffectPass,
-            BloomEffect,
-            KernelSize,
-            Resolution,
-            SMAAEffect,
-            VignetteEffect,
-            KawaseBlurPass
-        } = window.POSTPROCESSING;
+            const posArray = new Float32Array(INSTANCES_COUNT * 3);
+            const quatArray = new Float32Array(INSTANCES_COUNT * 4);
+            const radius = 1.5;
+            const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+            const up = new THREE.Vector3(0, 1, 0);
+            const tempPos = new THREE.Vector3();
+            const tempQuat = new THREE.Quaternion();
 
-        // ============================================================
-        //  IMPOR Three.js
-        // ============================================================
-        import * as THREE from 'three';
-        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+            for (let i = 0; i < INSTANCES_COUNT; i++) {
+                const y = 1 - (i / (INSTANCES_COUNT - 1)) * 2;
+                const r = Math.sqrt(1 - y * y);
+                const theta = goldenAngle * i;
+                const x = Math.cos(theta) * r * radius;
+                const z = Math.sin(theta) * r * radius;
+                const posY = y * radius;
 
-        // ============================================================
-        //  SHADER SOURCE (sama seperti sebelumnya, saya singkatkan)
-        //  Silakan salin semua shader dari kode sebelumnya di sini.
-        //  Untuk menjaga agar file tidak terlalu panjang, saya hanya
-        //  memberi placeholder. Kamu harus menyalin isi shader yang
-        //  sudah diberikan sebelumnya.
-        // ============================================================
-        const sphereVertexShader = `...`; // salin dari kode sebelumnya
-        const sphereFragmentShader = `...`;
-        const heroVertexShader = `...`;
-        const heroFragmentShader = `...`;
-        const heroDepthFragmentShader = `...`;
-        const floorVertexShader = `...`;
-        const floorFragmentShader = `...`;
+                posArray[i * 3] = x;
+                posArray[i * 3 + 1] = posY;
+                posArray[i * 3 + 2] = z;
 
-        // ============================================================
-        //  KONSTANTA
-        // ============================================================
-        const INSTANCES_COUNT = 3000;
-        const lightPosition = new THREE.Vector3(-1, 0.8, 0.25).normalize().multiplyScalar(5);
+                tempPos.set(-x, -posY, -z).normalize();
+                tempQuat.setFromUnitVectors(up, tempPos);
+                quatArray[i * 4] = tempQuat.x;
+                quatArray[i * 4 + 1] = tempQuat.y;
+                quatArray[i * 4 + 2] = tempQuat.z;
+                quatArray[i * 4 + 3] = tempQuat.w;
+            }
+            heroGeo.setAttribute('a_instancePos', new THREE.InstancedBufferAttribute(posArray, 3));
+            heroGeo.setAttribute('a_instanceQuaternions', new THREE.InstancedBufferAttribute(quatArray, 4));
 
-        // ============================================================
-        //  SETUP DASAR
-        // ============================================================
-        const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 30);
-        camera.position.set(0, 0, 5);
+            // ============================================================
+            //  HERO UNIFORMS
+            // ============================================================
+            const heroUniforms = {
+                u_scale: { value: 0.06 },
+                u_lightPosition: { value: lightPosition },
+                u_noiseTexture: { value: noiseTexture },
+                u_noiseTexelSize: { value: new THREE.Vector2(1 / 128, 1 / 128) },
+                u_noiseCoordOffset: { value: new THREE.Vector2(0, 0) },
+                u_color: { value: new THREE.Color('#B2B8BB') },
+                u_sphere1Position: { value: new THREE.Vector3(0, 0, 0) },
+                u_sphere2Position: { value: new THREE.Vector3(0, 0, 0) },
+                u_sphere3Position: { value: new THREE.Vector3(0, 0, 0) },
+                u_sphere4Position: { value: new THREE.Vector3(0, 0, 0) },
+                ...THREE.UniformsUtils.merge([THREE.UniformsLib.lights]),
+            };
 
-        const renderer = new THREE.WebGLRenderer({
-            antialias: false,
-            powerPreference: 'high-performance',
-            stencil: false,
-            alpha: false,
-        });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
-        renderer.shadowMap.enabled = true;
-        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-        renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        renderer.toneMappingExposure = 1.0;
-        document.body.appendChild(renderer.domElement);
-
-        const controls = new OrbitControls(camera, renderer.domElement);
-        controls.enableDamping = true;
-        controls.dampingFactor = 0.05;
-        controls.minDistance = 1;
-        controls.maxDistance = 15;
-        controls.target.set(0, 0, 0);
-
-        // ============================================================
-        //  POSTPROCESSING (menggunakan objek dari window.POSTPROCESSING)
-        // ============================================================
-        const composer = new EffectComposer(renderer, {
-            multisampling: 0,
-            antialias: false,
-            alpha: false,
-        });
-        composer.addPass(new RenderPass(scene, camera));
-
-        const bloom = new BloomEffect({
-            mipmapBlur: true,
-            luminanceThreshold: 0.65,
-            luminanceSmoothing: 0.01,
-            intensity: 2,
-            kernelSize: KernelSize.MEDIUM,
-            resolutionScale: 0.5,
-            resolutionX: Resolution.AUTO_SIZE,
-            resolutionY: Resolution.AUTO_SIZE,
-            width: Resolution.AUTO_SIZE,
-            height: Resolution.AUTO_SIZE,
-        });
-        const vignette = new VignetteEffect({
-            darkness: 0.6,
-            offset: 0.3,
-        });
-        composer.addPass(new EffectPass(camera, new SMAAEffect()));
-        composer.addPass(new EffectPass(camera, bloom));
-        composer.addPass(new EffectPass(camera, vignette));
-
-        // ============================================================
-        //  LOAD TEXTURES
-        // ============================================================
-        const loader = new THREE.TextureLoader();
-        const noiseTexture = loader.load('bnoise.png');
-        noiseTexture.wrapS = THREE.RepeatWrapping;
-        noiseTexture.wrapT = THREE.RepeatWrapping;
-        const matcapTexture = loader.load('glass.png');
-
-        // ============================================================
-        //  LIGHTS
-        // ============================================================
-        const dirLight = new THREE.DirectionalLight(0xffffff, 1);
-        dirLight.position.copy(lightPosition);
-        dirLight.castShadow = true;
-        dirLight.shadow.mapSize.width = 1024;
-        dirLight.shadow.mapSize.height = 1024;
-        dirLight.shadow.camera.left = -3;
-        dirLight.shadow.camera.right = 3;
-        dirLight.shadow.camera.top = 3;
-        dirLight.shadow.camera.bottom = -3;
-        dirLight.shadow.camera.near = 0.1;
-        dirLight.shadow.camera.far = 20;
-        dirLight.shadow.bias = -0.0001;
-        scene.add(dirLight);
-
-        // ============================================================
-        //  BACKGROUND (gradien)
-        // ============================================================
-        const bgUniforms = {
-            u_color0: { value: new THREE.Color('#AEB2B5') },
-            u_color1: { value: new THREE.Color('#939A9D') },
-        };
-        const bgMat = new THREE.ShaderMaterial({
-            vertexShader: `
-                varying vec2 v_uv;
-                void main() {
-                    v_uv = position.xy * 0.5 + 0.5;
-                    gl_Position = vec4(position.xy, 0.0, 1.0);
-                }
-            `,
-            fragmentShader: `
-                varying vec2 v_uv;
-                uniform vec3 u_color0;
-                uniform vec3 u_color1;
-                void main() {
-                    gl_FragColor = vec4(mix(u_color0, u_color1, v_uv.x), 1.0);
-                }
-            `,
-            uniforms: bgUniforms,
-            depthWrite: false,
-            depthTest: false,
-        });
-        const bgMesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), bgMat);
-        bgMesh.renderOrder = -2;
-        scene.add(bgMesh);
-
-        // ============================================================
-        //  HERO GEOMETRY (Instanced)
-        // ============================================================
-        const refGeo = new THREE.CapsuleGeometry(1, 4, 4, 16);
-        refGeo.computeBoundingBox();
-
-        const heroGeo = new THREE.InstancedBufferGeometry();
-        for (const key in refGeo.attributes) {
-            heroGeo.setAttribute(key, refGeo.attributes[key]);
-        }
-        heroGeo.setIndex(refGeo.index);
-
-        const posArray = new Float32Array(INSTANCES_COUNT * 3);
-        const quatArray = new Float32Array(INSTANCES_COUNT * 4);
-        const radius = 1.5;
-        const goldenAngle = Math.PI * (3 - Math.sqrt(5));
-        const up = new THREE.Vector3(0, 1, 0);
-        const tempPos = new THREE.Vector3();
-        const tempQuat = new THREE.Quaternion();
-
-        for (let i = 0; i < INSTANCES_COUNT; i++) {
-            const y = 1 - (i / (INSTANCES_COUNT - 1)) * 2;
-            const r = Math.sqrt(1 - y * y);
-            const theta = goldenAngle * i;
-            const x = Math.cos(theta) * r * radius;
-            const z = Math.sin(theta) * r * radius;
-            const posY = y * radius;
-
-            posArray[i * 3] = x;
-            posArray[i * 3 + 1] = posY;
-            posArray[i * 3 + 2] = z;
-
-            tempPos.set(-x, -posY, -z).normalize();
-            tempQuat.setFromUnitVectors(up, tempPos);
-            quatArray[i * 4] = tempQuat.x;
-            quatArray[i * 4 + 1] = tempQuat.y;
-            quatArray[i * 4 + 2] = tempQuat.z;
-            quatArray[i * 4 + 3] = tempQuat.w;
-        }
-        heroGeo.setAttribute('a_instancePos', new THREE.InstancedBufferAttribute(posArray, 3));
-        heroGeo.setAttribute('a_instanceQuaternions', new THREE.InstancedBufferAttribute(quatArray, 4));
-
-        // ============================================================
-        //  HERO UNIFORMS
-        // ============================================================
-        const heroUniforms = {
-            u_scale: { value: 0.06 },
-            u_lightPosition: { value: lightPosition },
-            u_noiseTexture: { value: noiseTexture },
-            u_noiseTexelSize: { value: new THREE.Vector2(1 / 128, 1 / 128) },
-            u_noiseCoordOffset: { value: new THREE.Vector2(0, 0) },
-            u_color: { value: new THREE.Color('#B2B8BB') },
-            u_sphere1Position: { value: new THREE.Vector3(0, 0, 0) },
-            u_sphere2Position: { value: new THREE.Vector3(0, 0, 0) },
-            u_sphere3Position: { value: new THREE.Vector3(0, 0, 0) },
-            u_sphere4Position: { value: new THREE.Vector3(0, 0, 0) },
-            ...THREE.UniformsUtils.merge([THREE.UniformsLib.lights]),
-        };
-
-        const heroMat = new THREE.ShaderMaterial({
-            vertexShader: heroVertexShader,
-            fragmentShader: heroFragmentShader,
-            uniforms: heroUniforms,
-            lights: true,
-        });
-        const heroDepthMat = new THREE.ShaderMaterial({
-            vertexShader: heroVertexShader,
-            fragmentShader: heroDepthFragmentShader,
-            uniforms: heroUniforms,
-            defines: { IS_DEPTH: true },
-        });
-
-        const heroMesh = new THREE.Mesh(heroGeo, heroMat);
-        heroMesh.castShadow = true;
-        heroMesh.receiveShadow = true;
-        heroMesh.renderOrder = 0;
-        heroMesh.customDepthMaterial = heroDepthMat;
-        scene.add(heroMesh);
-
-        // ============================================================
-        //  DARK SPHERE (di bawah hero)
-        // ============================================================
-        const darkSphere = new THREE.Mesh(
-            new THREE.SphereGeometry(1.5, 32, 32),
-            new THREE.MeshBasicMaterial({ color: 0x111111 })
-        );
-        darkSphere.renderOrder = -1;
-        scene.add(darkSphere);
-
-        // ============================================================
-        //  SPHERE GEOMETRY & MATERIAL (untuk 4 bola transparan)
-        // ============================================================
-        const sphereGeo = new THREE.SphereGeometry(0.3, 32, 32);
-        const sphereUniforms = {
-            u_lightPosition: { value: lightPosition },
-            u_noiseTexture: { value: noiseTexture },
-            u_sceneTexture: { value: null },
-            u_resolution: { value: new THREE.Vector2() },
-            u_matcap: { value: matcapTexture },
-            ...THREE.UniformsUtils.merge([THREE.UniformsLib.lights]),
-        };
-        const sphereMat = new THREE.ShaderMaterial({
-            vertexShader: sphereVertexShader,
-            fragmentShader: sphereFragmentShader,
-            uniforms: sphereUniforms,
-            lights: true,
-        });
-
-        // ============================================================
-        //  BLUR PASS & RENDER TARGET (untuk efek refraksi)
-        // ============================================================
-        const blurPass = new KawaseBlurPass({ kernelSize: KernelSize.VERY_SMALL });
-        const blurRT = new THREE.WebGLRenderTarget(1, 1, { depthBuffer: false });
-        blurRT.texture.minFilter = THREE.LinearFilter;
-        blurRT.texture.magFilter = THREE.LinearFilter;
-
-        let tempRT = null;
-
-        function updateBlurSize() {
-            const w = Math.floor(window.innerWidth / 2);
-            const h = Math.floor(window.innerHeight / 2);
-            const dpr = Math.min(window.devicePixelRatio, 1.5);
-            const sw = w * dpr;
-            const sh = h * dpr;
-            blurRT.setSize(sw, sh);
-            blurPass.setSize(sw, sh);
-            sphereUniforms.u_resolution.value.set(sw, sh);
-            if (tempRT) tempRT.dispose();
-            tempRT = new THREE.WebGLRenderTarget(sw, sh, { depthBuffer: false });
-            tempRT.texture.minFilter = THREE.LinearFilter;
-            tempRT.texture.magFilter = THREE.LinearFilter;
-        }
-        updateBlurSize();
-        window.addEventListener('resize', updateBlurSize);
-
-        // ============================================================
-        //  SPHERE MESHES (4 bola)
-        // ============================================================
-        const spheres = [];
-        const configs = [
-            { speed: 1.0, phase: Math.PI / 1.1, plane: 'yz', dir: 1 },
-            { speed: 0.75, phase: Math.PI / 3.4, plane: 'xz', dir: -1 },
-            { speed: 0.5, phase: Math.PI / 2.2, plane: 'yz', dir: 1 },
-            { speed: 1.2, phase: Math.PI / 1.7, plane: 'xy', dir: -1 },
-        ];
-        const orbitRadius = 1.9;
-
-        function orbitPosition(time, config) {
-            const angle = config.dir * config.speed * time + config.phase;
-            if (config.plane === 'xy') return new THREE.Vector3(Math.cos(angle) * orbitRadius, Math.sin(angle) * orbitRadius, 0);
-            if (config.plane === 'xz') return new THREE.Vector3(Math.cos(angle) * orbitRadius, 0, Math.sin(angle) * orbitRadius);
-            if (config.plane === 'yz') return new THREE.Vector3(0, Math.cos(angle) * orbitRadius, Math.sin(angle) * orbitRadius);
-            return new THREE.Vector3(Math.cos(angle) * orbitRadius, Math.sin(angle) * orbitRadius, 0);
-        }
-
-        for (let i = 0; i < 4; i++) {
-            const mesh = new THREE.Mesh(sphereGeo, sphereMat);
-            mesh.castShadow = true;
-            mesh.receiveShadow = true;
-            mesh.renderOrder = 1;
-            scene.add(mesh);
-            spheres.push(mesh);
-        }
-
-        // ============================================================
-        //  FLOOR (hanya untuk bayangan)
-        // ============================================================
-        const floorUniforms = {
-            u_noiseTexture: { value: noiseTexture },
-            u_noiseTexelSize: { value: new THREE.Vector2(1 / 128, 1 / 128) },
-            u_noiseCoordOffset: { value: new THREE.Vector2(0, 0) },
-            ...THREE.UniformsUtils.merge([THREE.UniformsLib.lights]),
-        };
-        const floorMat = new THREE.ShaderMaterial({
-            vertexShader: floorVertexShader,
-            fragmentShader: floorFragmentShader,
-            uniforms: floorUniforms,
-            lights: true,
-            transparent: true,
-        });
-        const floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(8, 8), floorMat);
-        floorMesh.rotation.x = -Math.PI / 2;
-        floorMesh.position.set(4, -3, -1.5);
-        floorMesh.receiveShadow = true;
-        scene.add(floorMesh);
-
-        // ============================================================
-        //  ANIMASI & RENDER LOOP
-        // ============================================================
-        const clock = new THREE.Clock();
-
-        function animate() {
-            const elapsed = clock.getElapsedTime();
-
-            // Update posisi spheres
-            const positions = configs.map(cfg => orbitPosition(elapsed, cfg));
-            spheres.forEach((mesh, i) => {
-                const pos = positions[i];
-                mesh.position.copy(pos);
-                const key = `u_sphere${i + 1}Position`;
-                heroUniforms[key].value.copy(pos);
+            const heroMat = new THREE.ShaderMaterial({
+                vertexShader: heroVertexShader,
+                fragmentShader: heroFragmentShader,
+                uniforms: heroUniforms,
+                lights: true,
+            });
+            const heroDepthMat = new THREE.ShaderMaterial({
+                vertexShader: heroVertexShader,
+                fragmentShader: heroDepthFragmentShader,
+                uniforms: heroUniforms,
+                defines: { IS_DEPTH: true },
             });
 
-            // Offset noise
-            heroUniforms.u_noiseCoordOffset.value.set(Math.random(), Math.random());
-            floorUniforms.u_noiseCoordOffset.value.set(Math.random(), Math.random());
+            const heroMesh = new THREE.Mesh(heroGeo, heroMat);
+            heroMesh.castShadow = true;
+            heroMesh.receiveShadow = true;
+            heroMesh.renderOrder = 0;
+            heroMesh.customDepthMaterial = heroDepthMat;
+            scene.add(heroMesh);
 
-            // Update matcap di sphere uniform
-            sphereUniforms.u_matcap.value = matcapTexture;
+            // ============================================================
+            //  DARK SPHERE
+            // ============================================================
+            const darkSphere = new THREE.Mesh(
+                new THREE.SphereGeometry(1.5, 32, 32),
+                new THREE.MeshBasicMaterial({ color: 0x111111 })
+            );
+            darkSphere.renderOrder = -1;
+            scene.add(darkSphere);
 
-            // ---- BLUR UNTUK REFRAKSI ----
-            // 1. Render scene mentah (tanpa postprocessing) ke blurRT
-            renderer.setRenderTarget(blurRT);
-            renderer.render(scene, camera);
+            // ============================================================
+            //  SPHERE GEOMETRY & MATERIAL
+            // ============================================================
+            const sphereGeo = new THREE.SphereGeometry(0.3, 32, 32);
+            const sphereUniforms = {
+                u_lightPosition: { value: lightPosition },
+                u_noiseTexture: { value: noiseTexture },
+                u_sceneTexture: { value: null },
+                u_resolution: { value: new THREE.Vector2() },
+                u_matcap: { value: matcapTexture },
+                ...THREE.UniformsUtils.merge([THREE.UniformsLib.lights]),
+            };
+            const sphereMat = new THREE.ShaderMaterial({
+                vertexShader: sphereVertexShader,
+                fragmentShader: sphereFragmentShader,
+                uniforms: sphereUniforms,
+                lights: true,
+            });
 
-            // 2. Blur dari blurRT ke tempRT
-            blurPass.render(renderer, blurRT, tempRT);
+            // ============================================================
+            //  BLUR PASS & RENDER TARGET
+            // ============================================================
+            const blurPass = new KawaseBlurPass({ kernelSize: KernelSize.VERY_SMALL });
+            const blurRT = new THREE.WebGLRenderTarget(1, 1, { depthBuffer: false });
+            blurRT.texture.minFilter = THREE.LinearFilter;
+            blurRT.texture.magFilter = THREE.LinearFilter;
 
-            // 3. Gunakan texture hasil blur sebagai u_sceneTexture
-            sphereUniforms.u_sceneTexture.value = tempRT.texture;
+            let tempRT = null;
 
-            // Kembali ke default framebuffer
-            renderer.setRenderTarget(null);
-
-            // 4. Render composer (dengan bloom, vignette)
-            composer.render();
-
-            controls.update();
-            requestAnimationFrame(animate);
-        }
-
-        animate();
-
-        // ============================================================
-        //  RESIZE HANDLER
-        // ============================================================
-        window.addEventListener('resize', () => {
-            const w = window.innerWidth;
-            const h = window.innerHeight;
-            camera.aspect = w / h;
-            camera.updateProjectionMatrix();
-            renderer.setSize(w, h);
-            composer.setSize(w, h);
+            function updateBlurSize() {
+                const w = Math.floor(window.innerWidth / 2);
+                const h = Math.floor(window.innerHeight / 2);
+                const dpr = Math.min(window.devicePixelRatio, 1.5);
+                const sw = w * dpr;
+                const sh = h * dpr;
+                blurRT.setSize(sw, sh);
+                blurPass.setSize(sw, sh);
+                sphereUniforms.u_resolution.value.set(sw, sh);
+                if (tempRT) tempRT.dispose();
+                tempRT = new THREE.WebGLRenderTarget(sw, sh, { depthBuffer: false });
+                tempRT.texture.minFilter = THREE.LinearFilter;
+                tempRT.texture.magFilter = THREE.LinearFilter;
+            }
             updateBlurSize();
-        });
+            window.addEventListener('resize', updateBlurSize);
 
-        console.log('✅ Vanilla Three.js Hero siap!');
+            // ============================================================
+            //  SPHERE MESHES
+            // ============================================================
+            const spheres = [];
+            const configs = [
+                { speed: 1.0, phase: Math.PI / 1.1, plane: 'yz', dir: 1 },
+                { speed: 0.75, phase: Math.PI / 3.4, plane: 'xz', dir: -1 },
+                { speed: 0.5, phase: Math.PI / 2.2, plane: 'yz', dir: 1 },
+                { speed: 1.2, phase: Math.PI / 1.7, plane: 'xy', dir: -1 },
+            ];
+            const orbitRadius = 1.9;
+
+            function orbitPosition(time, config) {
+                const angle = config.dir * config.speed * time + config.phase;
+                if (config.plane === 'xy') return new THREE.Vector3(Math.cos(angle) * orbitRadius, Math.sin(angle) * orbitRadius, 0);
+                if (config.plane === 'xz') return new THREE.Vector3(Math.cos(angle) * orbitRadius, 0, Math.sin(angle) * orbitRadius);
+                if (config.plane === 'yz') return new THREE.Vector3(0, Math.cos(angle) * orbitRadius, Math.sin(angle) * orbitRadius);
+                return new THREE.Vector3(Math.cos(angle) * orbitRadius, Math.sin(angle) * orbitRadius, 0);
+            }
+
+            for (let i = 0; i < 4; i++) {
+                const mesh = new THREE.Mesh(sphereGeo, sphereMat);
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                mesh.renderOrder = 1;
+                scene.add(mesh);
+                spheres.push(mesh);
+            }
+
+            // ============================================================
+            //  FLOOR
+            // ============================================================
+            const floorUniforms = {
+                u_noiseTexture: { value: noiseTexture },
+                u_noiseTexelSize: { value: new THREE.Vector2(1 / 128, 1 / 128) },
+                u_noiseCoordOffset: { value: new THREE.Vector2(0, 0) },
+                ...THREE.UniformsUtils.merge([THREE.UniformsLib.lights]),
+            };
+            const floorMat = new THREE.ShaderMaterial({
+                vertexShader: floorVertexShader,
+                fragmentShader: floorFragmentShader,
+                uniforms: floorUniforms,
+                lights: true,
+                transparent: true,
+            });
+            const floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(8, 8), floorMat);
+            floorMesh.rotation.x = -Math.PI / 2;
+            floorMesh.position.set(4, -3, -1.5);
+            floorMesh.receiveShadow = true;
+            scene.add(floorMesh);
+
+            // ============================================================
+            //  ANIMASI
+            // ============================================================
+            const clock = new THREE.Clock();
+
+            function animate() {
+                const elapsed = clock.getElapsedTime();
+
+                const positions = configs.map(cfg => orbitPosition(elapsed, cfg));
+                spheres.forEach((mesh, i) => {
+                    const pos = positions[i];
+                    mesh.position.copy(pos);
+                    const key = `u_sphere${i + 1}Position`;
+                    heroUniforms[key].value.copy(pos);
+                });
+
+                heroUniforms.u_noiseCoordOffset.value.set(Math.random(), Math.random());
+                floorUniforms.u_noiseCoordOffset.value.set(Math.random(), Math.random());
+                sphereUniforms.u_matcap.value = matcapTexture;
+
+                // Blur
+                renderer.setRenderTarget(blurRT);
+                renderer.render(scene, camera);
+                blurPass.render(renderer, blurRT, tempRT);
+                sphereUniforms.u_sceneTexture.value = tempRT.texture;
+                renderer.setRenderTarget(null);
+
+                composer.render();
+                controls.update();
+                requestAnimationFrame(animate);
+            }
+
+            animate();
+
+            window.addEventListener('resize', () => {
+                const w = window.innerWidth;
+                const h = window.innerHeight;
+                camera.aspect = w / h;
+                camera.updateProjectionMatrix();
+                renderer.setSize(w, h);
+                composer.setSize(w, h);
+                updateBlurSize();
+            });
+
+            console.log('✅ Vanilla Three.js Hero siap!');
+        })();
     </script>
 </body>
 </html>
